@@ -8,6 +8,7 @@ import { resolveOperator } from "@/lib/routing";
 import { orangeAdapter } from "@/lib/operators/orange";
 import { mtnAdapter } from "@/lib/operators/mtn";
 import { TRPCError } from "@trpc/server";
+import { sendPaymentSMS } from "@/lib/twilio";
 
 export const paymentsRouter = router({
   initiate: merchantProcedure
@@ -54,6 +55,14 @@ export const paymentsRouter = router({
         .where(eq(transactions.id, tx.id))
         .returning();
 
+      // Envoi du SMS Twilio à l'initiateur du paiement (asynchrone)
+      sendPaymentSMS({
+        toPhone: input.payerMsisdn,
+        amount: input.amount,
+        currency: input.currency,
+        externalId: input.externalId,
+      }).catch((err) => console.error("[Twilio Error]", err));
+
       return updated;
     }),
 
@@ -61,11 +70,33 @@ export const paymentsRouter = router({
     .input(z.object({ transactionId: z.string().uuid() }))
     .query(({ input }) => db.query.transactions.findFirst({ where: eq(transactions.id, input.transactionId) })),
 
-  list: merchantProcedure.query(({ ctx }) =>
-    db.query.transactions.findMany({
-      where: eq(transactions.merchantId, ctx.merchantId),
-      orderBy: (t, { desc }) => [desc(t.createdAt)],
-      limit: 50,
-    })
-  ),
+  list: merchantProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(10),
+      }).optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const page = input?.page ?? 1;
+      const limit = input?.limit ?? 10;
+      const offset = (page - 1) * limit;
+
+      const allTx = await db.query.transactions.findMany({
+        where: eq(transactions.merchantId, ctx.merchantId),
+        orderBy: (t, { desc }) => [desc(t.createdAt)],
+      });
+
+      const totalCount = allTx.length;
+      const totalPages = Math.ceil(totalCount / limit) || 1;
+      const items = allTx.slice(offset, offset + limit);
+
+      return {
+        items,
+        totalCount,
+        totalPages,
+        page,
+        limit,
+      };
+    }),
 });

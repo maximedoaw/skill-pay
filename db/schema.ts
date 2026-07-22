@@ -1,6 +1,8 @@
 import { pgTable, uuid, varchar, bigint, boolean, timestamp, jsonb, pgEnum } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 
-export const merchantStatus = pgEnum("merchant_status", ["PENDING", "ACTIVE", "SUSPENDED", "CLOSED"]);
+export const merchantStatus = pgEnum("merchant_status", ["PENDING", "ACTIVE", "SUSPENDED", "CLOSED", "REJECTED"]);
+export const documentStatus = pgEnum("document_status", ["PENDING", "APPROVED", "REJECTED"]);
 export const operatorEnum = pgEnum("operator", ["ORANGE_MONEY", "MTN_MOMO"]);
 export const transactionStatus = pgEnum("transaction_status", [
   "INITIATED", "PENDING", "SUCCESSFUL", "FAILED", "EXPIRED", "REFUNDED",
@@ -8,6 +10,7 @@ export const transactionStatus = pgEnum("transaction_status", [
 
 export const merchants = pgTable("merchants", {
   id: uuid("id").primaryKey().defaultRandom(),
+  username: varchar("username", { length: 255 }).notNull().default("anonymous"),
   clerkUserId: varchar("clerk_user_id", { length: 128 }).notNull().unique(),
   businessName: varchar("business_name", { length: 255 }).notNull(),
   phone: varchar("phone", { length: 20 }).notNull(),
@@ -19,6 +22,28 @@ export const merchants = pgTable("merchants", {
   status: merchantStatus("status").notNull().default("PENDING"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const merchantDocuments = pgTable("merchant_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id").notNull().references(() => merchants.id),
+  type: varchar("type", { length: 50 }).notNull(), // cni, rccm, other
+  name: varchar("name", { length: 255 }).notNull(),
+  url: varchar("url", { length: 512 }).notNull(),
+  status: documentStatus("status").notNull().default("PENDING"),
+  rejectionReason: varchar("rejection_reason", { length: 255 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const merchantsRelations = relations(merchants, ({ many }) => ({
+  documents: many(merchantDocuments),
+}));
+
+export const merchantDocumentsRelations = relations(merchantDocuments, ({ one }) => ({
+  merchant: one(merchants, {
+    fields: [merchantDocuments.merchantId],
+    references: [merchants.id],
+  }),
+}));
 
 export const transactions = pgTable("transactions", {
   id: uuid("id").primaryKey().defaultRandom(),
